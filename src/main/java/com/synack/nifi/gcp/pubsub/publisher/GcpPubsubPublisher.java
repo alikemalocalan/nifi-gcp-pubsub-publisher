@@ -1,4 +1,3 @@
-
 package com.synack.nifi.gcp.pubsub.publisher;
 
 import com.google.api.gax.batching.BatchingSettings;
@@ -19,10 +18,8 @@ import org.apache.nifi.annotation.documentation.SeeAlso;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.PropertyDescriptor;
-import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.processor.*;
-import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.threeten.bp.Duration;
 
@@ -111,28 +108,21 @@ public class GcpPubsubPublisher extends AbstractProcessor {
 
     @OnScheduled
     public void onScheduled(final ProcessContext context) {
-        Long batchSize = Long.valueOf(context.getProperty(batchProperty).getValue());
+        Long batchSize = context.getProperty(batchProperty).asLong();
+        String projectID = context.getProperty(projectIdProperty).getValue();
+        String topicName = context.getProperty(topicProperty).getValue();
+        String authKeys = context.getProperty(authProperty).getValue();
 
-        ProjectTopicName topic = ProjectTopicName.of(context.getProperty(projectIdProperty).getValue(),
-                context.getProperty(topicProperty).getValue());
+        ProjectTopicName topic = ProjectTopicName.of(projectID, topicName);
         try {
-            PropertyValue authKeys = context.getProperty(authProperty);
-            if (authKeys.isSet()) {
-                publisher = createPublisherWithCustomCredentials(topic, authKeys.getValue(), batchSize);
-            }
-
+            publisher = createPublisherWithCustomCredentials(topic, authKeys, batchSize);
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
     @Override
-    public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
-        /*
-        if (publisher == null || topic == null) {
-            throw new ProcessException("Context not initialized");
-        }
-        */
+    public void onTrigger(final ProcessContext context, final ProcessSession session) {
 
         // do the normal flow stuff.
         int batch = context.getProperty(batchProperty).asLong().intValue();
@@ -175,16 +165,13 @@ public class GcpPubsubPublisher extends AbstractProcessor {
         }
 
         session.commit();
-
     }
 
-    private Publisher createPublisherWithCustomCredentials(ProjectTopicName topicName, String authKeyStream, Long batchSize) throws IOException {
-        // [START pubsub_publisher_custom_credentials]
-        // read service account credentials from file
+    private Publisher createPublisherWithCustomCredentials(ProjectTopicName topic, String authKeyStream, Long batchSize) throws IOException {
         long requestBytesThreshold = 5000L; // default : 1kb
         Duration publishDelayThreshold = Duration.ofMillis(100); // default : 1 ms
 
-
+        // read service account credentials from file
         CredentialsProvider credentialsProvider =
                 FixedCredentialsProvider.create(
                         ServiceAccountCredentials.fromStream(new ByteArrayInputStream(authKeyStream.getBytes())));
@@ -195,9 +182,7 @@ public class GcpPubsubPublisher extends AbstractProcessor {
                 .setDelayThreshold(publishDelayThreshold)
                 .build();
 
-
-        // [END pubsub_publisher_custom_credentials]
-        return Publisher.newBuilder(topicName)
+        return Publisher.newBuilder(topic)
                 .setBatchingSettings(batchingSettings)
                 .setCredentialsProvider(credentialsProvider)
                 .build();

@@ -4,15 +4,16 @@
     <groupId>com.synack</groupId>
     <artifactId>nifi-gcp-pubsub-publisher</artifactId>
     <version>1.1-SNAPSHOT</version>
+    <name>nifi-gcp-pubsub-publisher</name>
     <packaging>nar</packaging>
-    
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <nifi.version>1.4.0</nifi.version>
     </properties>
-    
+
     <dependencies>
         <dependency>
             <groupId>com.google.cloud</groupId>
@@ -25,18 +26,13 @@
             <version>${nifi.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.jayway.jsonpath</groupId>
-            <artifactId>json-path</artifactId>
-            <version>1.2.0</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-mock</artifactId>
             <version>${nifi.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
-    
+
     <build>
         <plugins>
             <plugin>
@@ -60,5 +56,4 @@
             </plugin>
         </plugins>
     </build>
-    <name>nifi-gcp-pubsub-publisher</name>
 </project>
