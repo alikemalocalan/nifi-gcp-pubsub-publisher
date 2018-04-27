@@ -23,8 +23,9 @@ import org.apache.nifi.processor.*;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.threeten.bp.Duration;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -73,6 +74,11 @@ public class GcpPubsubPublisher extends AbstractProcessor {
     static final Relationship REL_TOOBIG = new Relationship.Builder()
             .name("toobig")
             .description("FlowFiles that are too big to be published")
+            .build();
+
+    static final Relationship SUCCESS = new Relationship.Builder()
+            .name("success")
+            .description("FlowFiles transfer success")
             .build();
 
     private List<PropertyDescriptor> descriptors;
@@ -146,7 +152,7 @@ public class GcpPubsubPublisher extends AbstractProcessor {
                 if (totalSize < MAX_FLOW_SIZE) {
                     toProcess.add(flowFile);
                 } else {
-                    session.transfer(flowFile);
+                    session.transfer(flowFile, SUCCESS);
                 }
             }
         }
@@ -171,10 +177,12 @@ public class GcpPubsubPublisher extends AbstractProcessor {
         long requestBytesThreshold = 5000L; // default : 1kb
         Duration publishDelayThreshold = Duration.ofMillis(100); // default : 1 ms
 
+        InputStream credentialJson = IOUtils.toInputStream(authKeyStream, StandardCharsets.UTF_8);
+
         // read service account credentials from file
         CredentialsProvider credentialsProvider =
                 FixedCredentialsProvider.create(
-                        ServiceAccountCredentials.fromStream(new ByteArrayInputStream(authKeyStream.getBytes())));
+                        ServiceAccountCredentials.fromStream(credentialJson));
 
         BatchingSettings batchingSettings = BatchingSettings.newBuilder()
                 .setElementCountThreshold(batchSize)
@@ -183,8 +191,8 @@ public class GcpPubsubPublisher extends AbstractProcessor {
                 .build();
 
         return Publisher.newBuilder(topic)
-                .setBatchingSettings(batchingSettings)
-                .setCredentialsProvider(credentialsProvider)
+                //.setBatchingSettings(batchingSettings)
+                //.setCredentialsProvider(credentialsProvider)
                 .build();
     }
 }

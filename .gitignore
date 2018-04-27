@@ -143,3 +143,11 @@ local.properties
 .scala_dependencies
 .worksheet
 
+.idea/compiler.xml
+.idea/encodings.xml
+.idea/misc.xml
+.idea/modules.xml
+.idea/sbt.xml
+.idea/vcs.xml
+nifi-gcp-pubsub-publisher.iml
+/.idea/
