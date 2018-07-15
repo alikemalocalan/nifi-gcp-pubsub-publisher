@@ -1,5 +1,6 @@
 package com.synack.nifi.gcp.pubsub.publisher;
 
+import com.google.api.core.ApiFuture;
 import com.google.api.gax.batching.BatchingSettings;
 import com.google.api.gax.core.CredentialsProvider;
 import com.google.api.gax.core.FixedCredentialsProvider;
@@ -157,13 +158,23 @@ public class GcpPubsubPublisher extends AbstractProcessor {
             }
         }
 
+        //List<ApiFuture<String>> futures = new ArrayList<>();
+
         // obtain the contents
         for (FlowFile flowFile : toProcess) {
             session.read(flowFile, in -> {
                 ByteString data = ByteString.copyFrom(IOUtils.toByteArray(in));
-                publisher.publish(PubsubMessage.newBuilder().setData(data).build());
+                ApiFuture<String> future = publisher.publish(PubsubMessage.newBuilder().setData(data).build());
+                //futures.add(future);
             });
         }
+
+        // For print pubsub rest response
+        /*try {
+            ApiFutures.allAsList(futures).get().forEach(System.out::println);
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
+        }*/
 
         // upload the messages and clean up local flows.
         for (FlowFile flowFile : toProcess) {
@@ -175,24 +186,23 @@ public class GcpPubsubPublisher extends AbstractProcessor {
 
     private Publisher createPublisherWithCustomCredentials(ProjectTopicName topic, String authKeyStream, Long batchSize) throws IOException {
         long requestBytesThreshold = 5000L; // default : 1kb
-        Duration publishDelayThreshold = Duration.ofMillis(100); // default : 1 ms
+        Duration publishDelayThreshold = Duration.ofMillis(300); // default : 1 ms
 
         InputStream credentialJson = IOUtils.toInputStream(authKeyStream, StandardCharsets.UTF_8);
 
         // read service account credentials from file
-        CredentialsProvider credentialsProvider =
-                FixedCredentialsProvider.create(
+        CredentialsProvider credentialsProvider = FixedCredentialsProvider.create(
                         ServiceAccountCredentials.fromStream(credentialJson));
 
         BatchingSettings batchingSettings = BatchingSettings.newBuilder()
                 .setElementCountThreshold(batchSize)
-                .setRequestByteThreshold(requestBytesThreshold)
-                .setDelayThreshold(publishDelayThreshold)
+                //.setRequestByteThreshold(requestBytesThreshold)
+                //.setDelayThreshold(publishDelayThreshold)
                 .build();
 
         return Publisher.newBuilder(topic)
-                //.setBatchingSettings(batchingSettings)
-                //.setCredentialsProvider(credentialsProvider)
+                .setBatchingSettings(batchingSettings)
+                .setCredentialsProvider(credentialsProvider)
                 .build();
     }
 }

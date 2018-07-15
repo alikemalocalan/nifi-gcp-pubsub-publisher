@@ -5,8 +5,6 @@ import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
 import org.junit.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
 import java.util.List;
 
 public class GcpPubsubPublisherTest {
@@ -15,21 +13,27 @@ public class GcpPubsubPublisherTest {
     @Test
     public void sendStringToPubSub() {
 
+
+        TestRunner testRunner = TestRunners.newTestRunner(GcpPubsubPublisher.class);
+
+
         //content of credential json file
         String authkey = "";
 
-        // Content to be mock a json file
-        InputStream content = new ByteArrayInputStream("test datas".getBytes());
-        TestRunner testRunner = TestRunners.newTestRunner(GcpPubsubPublisher.class);
-
         // Generate a test runner to mock a processor in a flow
-        testRunner.setProperty(GcpPubsubPublisher.projectIdProperty, "project-test");
-        testRunner.setProperty(GcpPubsubPublisher.topicProperty, "test-topic");
+        testRunner.setProperty(GcpPubsubPublisher.projectIdProperty, "project name");
+        testRunner.setProperty(GcpPubsubPublisher.topicProperty, "nifi-test-topic");
         testRunner.setProperty(GcpPubsubPublisher.authProperty, authkey);
-        testRunner.setProperty(GcpPubsubPublisher.batchProperty, "10");
+        testRunner.setProperty(GcpPubsubPublisher.batchProperty, "5");
 
         // Add the content to the runner
-        testRunner.enqueue(content);
+        testRunner.enqueue("Test data");
+        testRunner.enqueue("Test data");
+        testRunner.enqueue("Test data");
+        testRunner.enqueue("Test data");
+        testRunner.enqueue("Test data");
+        testRunner.enqueue("Test data");
+        testRunner.enqueue("Test data");
 
         // Run the enqueued content, it also takes an int = number of contents queued
         testRunner.run();
