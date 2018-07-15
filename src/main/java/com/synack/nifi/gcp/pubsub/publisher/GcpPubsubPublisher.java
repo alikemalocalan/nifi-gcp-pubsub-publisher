@@ -1,12 +1,17 @@
-
 package com.synack.nifi.gcp.pubsub.publisher;
 
+import com.google.api.core.ApiFuture;
+import com.google.api.gax.batching.BatchingSettings;
+import com.google.api.gax.core.CredentialsProvider;
+import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.auth.oauth2.ServiceAccountCredentials;
-import com.google.cloud.ByteArray;
-import com.google.cloud.pubsub.Message;
-import com.google.cloud.pubsub.PubSub;
-import com.google.cloud.pubsub.PubSubOptions;
-import com.google.cloud.pubsub.Topic;
+
+import com.google.cloud.pubsub.v1.Publisher;
+import com.google.protobuf.ByteString;
+import com.google.pubsub.v1.ProjectTopicName;
+import com.google.pubsub.v1.PubsubMessage;
+import org.apache.commons.io.IOUtils;
+
 import org.apache.nifi.annotation.behavior.ReadsAttribute;
 import org.apache.nifi.annotation.behavior.ReadsAttributes;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
@@ -16,12 +21,16 @@ import org.apache.nifi.annotation.documentation.SeeAlso;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.PropertyDescriptor;
-import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.processor.*;
-import org.apache.nifi.processor.exception.ProcessException;
-import org.apache.nifi.processor.io.InputStreamCallback;
+
 import org.apache.nifi.processor.util.StandardValidators;
+import org.threeten.bp.Duration;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -29,17 +38,16 @@ import java.io.InputStream;
 import java.util.*;
 
 /**
- *
  * @author Mikhail Sosonkin
  */
-@Tags({"gcp", "pubsub", "publish"})
+@Tags({"gcp", "publisher", "publish"})
 @CapabilityDescription("Publish to a GCP Pubsub topic")
 @SeeAlso({})
 @ReadsAttributes({
-    @ReadsAttribute(attribute = "", description = "")})
+        @ReadsAttribute(attribute = "", description = "")})
 @WritesAttributes({
-    @WritesAttribute(attribute = "filename", description = "name of the flow based on time"),
-    @WritesAttribute(attribute = "ack_id", description = "GCP meassge ACK id")})
+        @WritesAttribute(attribute = "filename", description = "name of the flow based on time"),
+        @WritesAttribute(attribute = "ack_id", description = "GCP meassge ACK id")})
 public class GcpPubsubPublisher extends AbstractProcessor {
 
     public static final PropertyDescriptor authProperty = new PropertyDescriptor.Builder().name("Authentication Keys")
@@ -53,20 +61,20 @@ public class GcpPubsubPublisher extends AbstractProcessor {
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
-    
+
     public static final PropertyDescriptor projectIdProperty = new PropertyDescriptor.Builder().name("Project ID")
             .description("Project ID")
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
-    
+
     public static final PropertyDescriptor batchProperty = new PropertyDescriptor.Builder().name("Batch size")
             .description("Max number of messages to send at a time")
             .required(true)
             .defaultValue("100")
             .addValidator(StandardValidators.LONG_VALIDATOR)
             .build();
-    
+
     static final Relationship REL_FAILURE = new Relationship.Builder()
             .name("failure")
             .description("FlowFiles that failed to be published")
@@ -76,28 +84,28 @@ public class GcpPubsubPublisher extends AbstractProcessor {
             .name("toobig")
             .description("FlowFiles that are too big to be published")
             .build();
+
     static final Relationship SUCCESS = new Relationship.Builder()
             .name("success")
-            .description("FlowFiles that are too big to be published")
+            .description("FlowFiles transfer success")
             .build();
-    
+  
     private List<PropertyDescriptor> descriptors;
 
     private Set<Relationship> relationships;
-    private PubSub pubsub;
-    private Topic topic;
+    private Publisher publisher;
     private static int MAX_FLOW_SIZE = 9000000;
-    
+
     @Override
     protected void init(final ProcessorInitializationContext context) {
-        final List<PropertyDescriptor> descriptors = new ArrayList<PropertyDescriptor>();
+        final List<PropertyDescriptor> descriptors = new ArrayList<>();
         descriptors.add(authProperty);
         descriptors.add(topicProperty);
         descriptors.add(projectIdProperty);
         descriptors.add(batchProperty);
         this.descriptors = Collections.unmodifiableList(descriptors);
 
-        final Set<Relationship> relationships = new HashSet<Relationship>();
+        final Set<Relationship> relationships = new HashSet<>();
         relationships.add(REL_FAILURE);
         relationships.add(REL_TOOBIG);
         this.relationships = Collections.unmodifiableSet(relationships);
@@ -115,87 +123,94 @@ public class GcpPubsubPublisher extends AbstractProcessor {
 
     @OnScheduled
     public void onScheduled(final ProcessContext context) {
-        if(topic == null) {
-            try {
-                PubSubOptions.Builder opts = PubSubOptions.newBuilder().setProjectId(context.getProperty(projectIdProperty).getValue());
-                
-                PropertyValue authKeys = context.getProperty(authProperty);
-                if(authKeys.isSet()) {
-                    opts = opts.setCredentials(ServiceAccountCredentials.fromStream(new ByteArrayInputStream(authKeys.getValue().getBytes())));
-                }
-                
-                pubsub = opts.build().getService();
-                
-            } catch (IOException ex) {
-                throw new ProcessException("Unable to open a pubsub", ex);
-            }
+        Long batchSize = context.getProperty(batchProperty).asLong();
+        String projectID = context.getProperty(projectIdProperty).getValue();
+        String topicName = context.getProperty(topicProperty).getValue();
+        String authKeys = context.getProperty(authProperty).getValue();
 
-            if(pubsub == null) {
-                throw new ProcessException("Pubsub not initialized");
-            }
-
-            String topicName = context.getProperty(topicProperty).getValue();
-            topic = pubsub.getTopic(topicName);
-
-            if(topic == null) {
-                throw new ProcessException("Topic not initialized: " + topicName);
-            }
+        ProjectTopicName topic = ProjectTopicName.of(projectID, topicName);
+        try {
+            publisher = createPublisherWithCustomCredentials(topic, authKeys, batchSize);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
     @Override
-    public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
-        if(pubsub == null || topic == null) {
-            throw new ProcessException("Context not initialized");
-        }
-        
+    public void onTrigger(final ProcessContext context, final ProcessSession session) {
+
         // do the normal flow stuff.
         int batch = context.getProperty(batchProperty).asLong().intValue();
         int counts = session.getQueueSize().getObjectCount();
         counts = Math.min(batch, counts);
-        
+
         // get as many messages as we can
         List<FlowFile> flowFiles = session.get(counts);
         if (flowFiles.size() == 0) {
             return;
         }
-        
+
         long totalSize = 0;
         List<FlowFile> toProcess = new ArrayList<>(counts);
-        for(FlowFile flowFile : flowFiles) {
-            if(flowFile.getSize() > MAX_FLOW_SIZE) {
+        for (FlowFile flowFile : flowFiles) {
+            if (flowFile.getSize() > MAX_FLOW_SIZE) {
                 session.transfer(flowFile, REL_TOOBIG);
             } else {
                 totalSize += flowFile.getSize();
 
-                if(totalSize < MAX_FLOW_SIZE) {
+                if (totalSize < MAX_FLOW_SIZE) {
                     toProcess.add(flowFile);
                 } else {
-                    session.transfer(flowFile);
+                    session.transfer(flowFile, SUCCESS);
                 }
             }
         }
-        
-        final List<Message> msgs = new ArrayList<>(counts);
-        
+
+        //List<ApiFuture<String>> futures = new ArrayList<>();
+
         // obtain the contents
-        for(FlowFile flowFile : toProcess) {
-            session.read(flowFile, new InputStreamCallback() {
-                @Override
-                public void process(InputStream in) throws IOException {
-                    msgs.add(Message.of(ByteArray.copyFrom(in)));
-                }
+        for (FlowFile flowFile : toProcess) {
+            session.read(flowFile, in -> {
+                ByteString data = ByteString.copyFrom(IOUtils.toByteArray(in));
+                ApiFuture<String> future = publisher.publish(PubsubMessage.newBuilder().setData(data).build());
+                //futures.add(future);
             });
         }
-        
+
+        // For print pubsub rest response
+        /*try {
+            ApiFutures.allAsList(futures).get().forEach(System.out::println);
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
+        }*/
+
         // upload the messages and clean up local flows.
-        topic.publish(msgs);
-        
-        for(FlowFile flowFile : toProcess) {
+        for (FlowFile flowFile : toProcess) {
             session.remove(flowFile);
         }
-        
+
         session.commit();
-        
+    }
+
+    private Publisher createPublisherWithCustomCredentials(ProjectTopicName topic, String authKeyStream, Long batchSize) throws IOException {
+        long requestBytesThreshold = 5000L; // default : 1kb
+        Duration publishDelayThreshold = Duration.ofMillis(300); // default : 1 ms
+
+        InputStream credentialJson = IOUtils.toInputStream(authKeyStream, StandardCharsets.UTF_8);
+
+        // read service account credentials from file
+        CredentialsProvider credentialsProvider = FixedCredentialsProvider.create(
+                        ServiceAccountCredentials.fromStream(credentialJson));
+
+        BatchingSettings batchingSettings = BatchingSettings.newBuilder()
+                .setElementCountThreshold(batchSize)
+                //.setRequestByteThreshold(requestBytesThreshold)
+                //.setDelayThreshold(publishDelayThreshold)
+                .build();
+
+        return Publisher.newBuilder(topic)
+                .setBatchingSettings(batchingSettings)
+                .setCredentialsProvider(credentialsProvider)
+                .build();
     }
 }
