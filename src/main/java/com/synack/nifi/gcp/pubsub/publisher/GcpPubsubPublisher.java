@@ -5,11 +5,13 @@ import com.google.api.gax.batching.BatchingSettings;
 import com.google.api.gax.core.CredentialsProvider;
 import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.auth.oauth2.ServiceAccountCredentials;
+
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
 import org.apache.commons.io.IOUtils;
+
 import org.apache.nifi.annotation.behavior.ReadsAttribute;
 import org.apache.nifi.annotation.behavior.ReadsAttributes;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
@@ -21,12 +23,18 @@ import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.processor.*;
+
 import org.apache.nifi.processor.util.StandardValidators;
 import org.threeten.bp.Duration;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.*;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.*;
 
 /**
@@ -81,7 +89,7 @@ public class GcpPubsubPublisher extends AbstractProcessor {
             .name("success")
             .description("FlowFiles transfer success")
             .build();
-
+  
     private List<PropertyDescriptor> descriptors;
 
     private Set<Relationship> relationships;
